@@ -1,0 +1,284 @@
+TASK 1
+sudo groupadd ans
+sudo useradd -m -G ans ansXXXXXX
+passwd ansXXXXXX //NE MORA OVA
+sudo hostnamectl set-host
+sudo hostnamectl set-hostname ans-09012004
+---------------------------------------------------
+TASK 1 (SECOND)
+sudo useradd -m anmsXXXXXX
+sudo visudo
+//ADD THE LINE AT THE END
+anmsXXXXXX ALL=(ALL) NOPASSWD: ALL
+//FOR QUIT
+ESC
+:wq
+ENTER
+//TEST SUDO
+su - anmsXXXXXX
+sudo whoami
+sudo hostnamectl set-hostname ddmmyyyy.ans.edu.mk
+//CHECK
+hostname
+hostname -f
+
+TASK 2 BIND
+sudo dnf install -y bind bind-utils
+sudo nano /etc/named.conf
+options {
+    directory "/var/named";
+    listen-on port 53 { any; };
+    allow-query { 10.10.0.0/16; };
+    recursion yes;
+
+    forwarders {
+        1.0.0.1;
+        1.1.1.1;
+    };
+};
+sudo nano /etc/named.rfc1912.zones
+zone "index.io.mk" IN {
+    type master;
+    file "index.io.mk.zone";
+};
+sudo nano sudo nano /var/named/index.io.mk.zone
+$TTL 86400
+@   IN  SOA ns1.index.io.mk. admin.index.io.mk. (
+        2024010101
+        3600
+        1800
+        604800
+        86400
+)
+
+@       IN  NS  ns1.index.io.mk.
+@       IN  NS  ns.ans.mk.
+
+ns1     IN  A   SERVER_IP
+www     IN  A   SERVER_IP
+ftp2    IN  A   SERVER_IP
+dns     IN  A   10.10.16.200
+web     IN  CNAME www.index.io.mk.
+
+sudo chown root:named /var/named/index.io.mk.zone
+sudo chmod 640 /var/named/index.io.mk.zone
+
+sudo systemctl enable --now named
+//LOCAL DNS
+sudo nmcli con mod ens160 ipv4.dns 127.0.0.1
+sudo nmcli con mod ens160 ipv4.ignore-auto-dns yes
+sudo nmcli con up ens160
+
+
+//WEB/MONITOR var/named/index.com.zone
+/*
+$TTL 86400
+@   IN  SOA localhost. root.localhost. (
+            2026010601 ; serial
+            3600       ; refresh
+            1800       ; retry
+            604800     ; expire
+            86400 )    ; minimum
+
+    IN  NS  name1
+
+web     IN  A   <YOUR_VM_IP>
+monitor IN  A   <YOUR_VM_IP>
+*/
+//ADD SLAVES
+/*
+sudo nano /etc/named.conf
+zone "anms.com.mk" IN {
+    type slave;
+    file "slaves/anms.com.mk.zone";
+    masters { 10.10.16.200; };
+};
+
+zone "ans.edu.mk" IN {
+    type slave;
+    file "slaves/ans.edu.mk.zone";
+    masters { 10.10.16.200; };
+};
+sudo mkdir -p /var/named/slaves
+sudo chown named:named /var/named/slaves
+sudo nano /etc/resolv.conf
+nameserver <YOUR_VM_IP>
+sudo systemctl restart named
+
+*/
+TASK 3 APACHE
+
+sudo dnf install -y httpd
+sudo systemctl enable --now httpd
+//MOODLE NA APACHE
+
+sudo dnf install -y php php-mysqlnd php-gd php-xml php-mbstring php-intl php-zip php-opcache
+//MARIADB
+sudo dnf install -y mariadb-server
+sudo systemctl enable --now mariadb
+//MYSQL
+
+sudo mysql_secure_installation
+mysql -u root -p
+CREATE DATABASE moodle DEFAULT CHARACTER SET utf8mb4;
+CREATE USER 'moodle'@'localhost' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES ON moodle.* TO 'moodle'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+cd /var/www/
+sudo git clone https://github.com/moodle/moodle.git
+sudo chown -R apache:apache moodle
+//APACHE VIRTUAL HOST
+sudo nano /etc/httpd/conf.d/moodle.conf
+Listen 8088
+
+<VirtualHost *:8088>
+    DocumentRoot /var/www/moodle
+    <Directory /var/www/moodle>
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+sudo systemctl restart httpd
+TASK 4 NFS CLIENT
+
+sudo dnf install -y nfs-utils
+sudo mkdir -p /nfs/jan2024 /nfs/proba2024
+sudo mount 10.10.16.200:/mnt/kolokvium_2024 /nfs/jan2024
+sudo mount 10.10.16.200:/mnt/proba /nfs/proba2024
+sudo nano /etc/fstab
+10.10.16.200:/mnt/kolokvium_2024 /nfs/jan2024 nfs defaults 0 0
+10.10.16.200:/mnt/proba /nfs/proba2024 nfs defaults 0 0
+//OPTIONAL
+/*
+10.10.16.200:/mnt/ispit2023 /nfs/ispitjan nfs defaults,_netdev 0 0
+10.10.16.200:/mnt/proba /nfs/probajan nfs defaults,_netdev 0 0
+
+*/
+mkdir /nfs/jan2024/INDEX
+touch /nfs/jan2024/INDEX/moj_fajl.txt
+TASK 5 FIREWALLD
+sudo systemctl enable --now firewalld
+sudo firewall-cmd --permanent --add-service=ssh
+sudo firewall-cmd --permanent --add-service=dns
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --permanent --add-service=ftp
+sudo firewall-cmd --permanent --add-port=8088/tcp
+sudo firewall-cmd --reload
+
+WORDPRESS
+
+sudo dnf install -y php php-cli php-mysqlnd php-gd php-xml php-mbstring php-intl php-zip php-opcache
+
+//MARIADB
+sudo dnf install -y mariadb-server
+sudo systemctl enable --now mariadb
+
+//MYSQL
+sudo mysql_secure_installation
+
+CREATE DATABASE wpdb;
+CREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'StrongPassword123!';
+GRANT ALL PRIVILEGES ON wpdb.* TO 'wpuser'@'localhost';
+FLUSH PRIVILEGES;
+cd /var/www/html
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xvzf latest.tar.gz
+sudo chown -R apache:apache wordpress
+//CREATE APACHE VIRTUAL HOST
+sudo nano /etc/httpd/conf.d/wp.index.com.conf
+<VirtualHost *:80>
+    ServerName wp.index.com
+    DocumentRoot /var/www/html/wordpress
+    <Directory /var/www/html/wordpress>
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+sudo systemctl restart httpd
+
+FTP SERVER
+
+sudo dnf install -y vsftpd
+sudo systemctl enable --now vsftpd
+//CREATE USER
+sudo useradd -m -d /home/student/ftp -s /sbin/nologin editor
+sudo passwd editor
+
+sudo mkdir -p /home/student/ftp
+sudo chown editor:editor /home/student/ftp
+sudo chmod 770 /home/student/ftp
+
+NGINX WEB SERVER
+sudo dnf install -y nginx
+sudo systemctl enable --now nginx
+
+WORDPRESS
+sudo dnf install -y php php-cli php-mysqlnd php-gd php-xml php-mbstring php-intl php-zip php-opcache
+//MARIADB
+sudo dnf install -y mariadb-server
+sudo systemctl enable --now MariaDB
+//MYSQL
+sudo mysql_secure_installation
+CREATE DATABASE wpdb;
+CREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'StrongPassword123!';
+GRANT ALL PRIVILEGES ON wpdb.* TO 'wpuser'@'localhost';
+FLUSH PRIVILEGES;
+cd /var/www
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xvzf latest.tar.gz
+sudo mv wordpress index_wp
+sudo chown -R nginx:nginx index_wp
+
+//CONFIGURE NGINX VIRTUAL HOST
+
+sudo nano /etc/nginx/conf.d/index.anms.com.mk.conf
+
+server {
+    listen 80;
+    server_name index.anms.com.mk;
+
+    root /var/www/index_wp;
+    index index.php index.html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:/var/run/php-fpm/www.sock;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+}
+sudo systemctl restart nginx
+sudo systemctl restart php-fpm
+//FTP USER WITH PRIVILEGES
+sudo dnf install -y vsftpd
+sudo systemctl enable --now vsftpd
+
+
+sudo useradd -m -d /var/www/index_wp editor
+sudo passwd editor
+sudo chown -R editor:editor /var/www/index_wp
+sudo nano /etc/vsftpd/vsftpd.conf
+
+local_enable=YES
+write_enable=YES
+chroot_local_user=YES
+sudo systemctl restart vsftpd
+IPTABLES
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+iptables -A INPUT -p tcp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+iptables -A INPUT -p tcp --dport 21 -j ACCEPT
+iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+
+
+
+
+
